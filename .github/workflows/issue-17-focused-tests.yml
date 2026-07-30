@@ -26,6 +26,14 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
+      - name: Restore incremental build data
+        uses: actions/cache@v5
+        with:
+          path: .derivedData
+          key: issue-17-derived-data-${{ github.run_id }}
+          restore-keys: |
+            issue-17-derived-data-
+
       - name: Run focused tests
         run: |
           xcodebuild \
@@ -33,5 +41,6 @@ jobs:
             -scheme mDone \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath .derivedData \
             -only-testing:mDoneTests/TaskServiceTests \
             test
