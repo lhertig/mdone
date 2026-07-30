@@ -1,0 +1,37 @@
+name: Issue 17 macOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_ref:
+        description: Branch or commit to build
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  macos-build:
+    name: mDone macOS Build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout requested ref
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.test_ref }}
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build macOS app
+        run: |
+          xcodebuild \
+            -project mDone.xcodeproj \
+            -scheme mDone-macOS \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
