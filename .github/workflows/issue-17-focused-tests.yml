@@ -7,6 +7,11 @@ on:
         description: Branch or commit to test
         required: true
         type: string
+      test_target:
+        description: xcodebuild only-testing target
+        required: true
+        default: mDoneTests/TaskServiceTests
+        type: string
 
 permissions:
   contents: read
@@ -42,5 +47,5 @@ jobs:
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 17' \
             -derivedDataPath .derivedData \
-            -only-testing:mDoneTests/TaskServiceTests \
+            -only-testing:${{ inputs.test_target }} \
             test
