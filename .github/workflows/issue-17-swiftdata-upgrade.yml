@@ -1,0 +1,84 @@
+name: Issue 17 SwiftData Upgrade Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      old_ref:
+        description: Commit with the previous CachedTask schema
+        required: true
+        type: string
+      candidate_ref:
+        description: Candidate commit with the new CachedTask schema
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  upgrade-store:
+    name: Upgrade existing SwiftData store
+    runs-on: macos-latest
+    steps:
+      - name: Checkout previous version
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.old_ref }}
+          path: old
+
+      - name: Checkout candidate
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.candidate_ref }}
+          path: candidate
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Boot clean simulator
+        run: |
+          xcrun simctl shutdown all || true
+          xcrun simctl erase all || true
+          xcrun simctl boot "iPhone 17"
+          xcrun simctl bootstatus booted -b
+
+      - name: Build and launch previous app to create its store
+        working-directory: old
+        run: |
+          xcodegen generate
+          xcodebuild \
+            -project mDone.xcodeproj \
+            -scheme mDone \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath ../derived-old \
+            build
+          xcrun simctl install booted ../derived-old/Build/Products/Debug-iphonesimulator/mDone.app
+          xcrun simctl launch booted com.mdone.app
+          sleep 8
+          OLD_CONTAINER=$(xcrun simctl get_app_container booted com.mdone.app data)
+          test -f "$OLD_CONTAINER/Library/Application Support/default.store"
+          printf '%s\n' "$OLD_CONTAINER" > ../old-container-path.txt
+          xcrun simctl terminate booted com.mdone.app
+
+      - name: Install candidate over existing store and verify successful launch
+        working-directory: candidate
+        run: |
+          xcodegen generate
+          xcodebuild \
+            -project mDone.xcodeproj \
+            -scheme mDone \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -derivedDataPath ../derived-candidate \
+            build
+          xcrun simctl install booted ../derived-candidate/Build/Products/Debug-iphonesimulator/mDone.app
+          NEW_CONTAINER=$(xcrun simctl get_app_container booted com.mdone.app data)
+          test "$NEW_CONTAINER" = "$(cat ../old-container-path.txt)"
+          test -f "$NEW_CONTAINER/Library/Application Support/default.store"
+          LAUNCH_OUTPUT=$(xcrun simctl launch booted com.mdone.app)
+          printf '%s\n' "$LAUNCH_OUTPUT"
+          PID=${LAUNCH_OUTPUT##*: }
+          sleep 8
+          xcrun simctl spawn booted kill -0 "$PID"
+          test -f "$NEW_CONTAINER/Library/Application Support/default.store"
