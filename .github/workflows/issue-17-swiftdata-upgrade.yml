@@ -45,6 +45,7 @@ jobs:
       - name: Build and launch previous app to create its store
         working-directory: old
         run: |
+          set -euxo pipefail
           xcodegen generate
           xcodebuild \
             -project mDone.xcodeproj \
@@ -54,16 +55,37 @@ jobs:
             -derivedDataPath ../derived-old \
             build
           xcrun simctl install booted ../derived-old/Build/Products/Debug-iphonesimulator/mDone.app
-          xcrun simctl launch booted com.mdone.app
+          LAUNCH_OUTPUT=$(xcrun simctl launch booted com.mdone.app)
+          printf '%s\n' "$LAUNCH_OUTPUT"
+          PID=${LAUNCH_OUTPUT##*: }
           sleep 8
+          if ! xcrun simctl spawn booted kill -0 "$PID"; then
+            xcrun simctl spawn booted log show --last 2m --predicate 'process == "mDone"' --style compact
+            exit 1
+          fi
           OLD_CONTAINER=$(xcrun simctl get_app_container booted com.mdone.app data)
-          test -f "$OLD_CONTAINER/Library/Application Support/default.store"
           printf '%s\n' "$OLD_CONTAINER" > ../old-container-path.txt
+          python3 - "$OLD_CONTAINER" ../old-store-relative-path.txt <<'PY'
+          import os
+          import sys
+          root, output = sys.argv[1:]
+          stores = []
+          for directory, _, files in os.walk(root):
+              for filename in files:
+                  if filename.endswith('.store'):
+                      stores.append(os.path.relpath(os.path.join(directory, filename), root))
+          print({'container': root, 'stores': stores})
+          if len(stores) != 1:
+              raise SystemExit(f'Expected exactly one SwiftData store, found {stores}')
+          with open(output, 'w') as handle:
+              handle.write(stores[0])
+          PY
           xcrun simctl terminate booted com.mdone.app
 
       - name: Install candidate over existing store and verify successful launch
         working-directory: candidate
         run: |
+          set -euxo pipefail
           xcodegen generate
           xcodebuild \
             -project mDone.xcodeproj \
@@ -74,11 +96,16 @@ jobs:
             build
           xcrun simctl install booted ../derived-candidate/Build/Products/Debug-iphonesimulator/mDone.app
           NEW_CONTAINER=$(xcrun simctl get_app_container booted com.mdone.app data)
-          test "$NEW_CONTAINER" = "$(cat ../old-container-path.txt)"
-          test -f "$NEW_CONTAINER/Library/Application Support/default.store"
+          read -r OLD_CONTAINER < ../old-container-path.txt
+          read -r STORE_RELATIVE_PATH < ../old-store-relative-path.txt
+          test "$NEW_CONTAINER" = "$OLD_CONTAINER"
+          test -f "$NEW_CONTAINER/$STORE_RELATIVE_PATH"
           LAUNCH_OUTPUT=$(xcrun simctl launch booted com.mdone.app)
           printf '%s\n' "$LAUNCH_OUTPUT"
           PID=${LAUNCH_OUTPUT##*: }
           sleep 8
-          xcrun simctl spawn booted kill -0 "$PID"
-          test -f "$NEW_CONTAINER/Library/Application Support/default.store"
+          if ! xcrun simctl spawn booted kill -0 "$PID"; then
+            xcrun simctl spawn booted log show --last 2m --predicate 'process == "mDone"' --style compact
+            exit 1
+          fi
+          test -f "$NEW_CONTAINER/$STORE_RELATIVE_PATH"
